@@ -66,7 +66,7 @@ def get_settings():
 
 
 @frappe.whitelist()
-def get_users():
+def get_users(force=0):
     app = settings()
     
     if not cint(app.enabled):
@@ -74,57 +74,67 @@ def get_users():
     
     cache_key = "users"
     
-    if app.refresh_interval >= _CACHE_INTERVAL_:
+    # If forced or manual refresh, purge cache
+    if cint(force):
+        del_cache(_CACHE_, cache_key)
+    elif app.refresh_interval >= _CACHE_INTERVAL_:
         cache = get_cache(_CACHE_, cache_key)
-        
         if cache and isinstance(cache, dict):
             if get_datetime(cache.expiry) >= now_datetime():
                 return {"users": cache.data}
-            
             del_cache(_CACHE_, cache_key)
     
-    
-    tp = [0, -20, 0]
-    sess_expiry = frappe.get_system_settings("session_expiry")
-    if not sess_expiry or not isinstance(sess_expiry, str):
-        sess_expiry = frappe.get_system_settings("session_expiry_mobile")
-    if not sess_expiry or not isinstance(sess_expiry, str):
-        sess_expiry = ""
+    # Active window: user must have active session within recent window (default 15 minutes)
+    window_minutes = max(cint(app.refresh_interval) * 2, 15)
+    cutoff = add_to_date(now(), minutes=-window_minutes, as_string=True, as_datetime=True)
     
     try:
-        if sess_expiry:
-            sess_list = sess_expiry.split(":")
-            if sess_list and not isinstance(sess_list, list):
-                sess_list = [sess_list]
-            if sess_list and isinstance(sess_list, list):
-                idx = 0
-                for v in sess_list:
-                    if v and isinstance(v, str):
-                        tpv = cint(v)
-                        if tpv:
-                            tp[idx] = -abs(tpv)
-                    idx += 1
-            
-            else:
-                return {"error": 1, "message": _("The system session expiry value is invalid.")}
-    
-    except Exception as exc:
-        log_error(exc)
-        return {"error": 1, "message": _("Unable to parse the system session expiry value.")}
-    
-    now_dt = now()
-    start = add_to_date(now_dt, hours=tp[0], minutes=tp[1], seconds=tp[2], as_string=True, as_datetime=True)
-    user_types = [v.user_type for v in app.user_types]
-    
-    try:
+        # Check active sessions in tabSessions
+        active_session_users = frappe.db.sql(
+            """
+            SELECT DISTINCT user FROM `tabSessions`
+            WHERE status = 'Active'
+              AND user != 'Guest'
+              AND user != %(current_user)s
+              AND lastupdate >= %(cutoff)s
+            """,
+            {"current_user": frappe.session.user, "cutoff": cutoff},
+            pluck=True,
+        )
+        
+        # Also check User.last_active where session exists (handles deferred db sync)
+        recent_active_users = frappe.db.sql(
+            """
+            SELECT DISTINCT s.user FROM `tabSessions` s
+            INNER JOIN `tabUser` u ON u.name = s.user
+            WHERE s.status = 'Active'
+              AND s.user != 'Guest'
+              AND s.user != %(current_user)s
+              AND u.last_active >= %(cutoff)s
+            """,
+            {"current_user": frappe.session.user, "cutoff": cutoff},
+            pluck=True,
+        )
+        
+        candidate_users = list(set(active_session_users + recent_active_users))
+        
+        if not candidate_users:
+            if app.refresh_interval >= _CACHE_INTERVAL_:
+                set_cache(_CACHE_, cache_key, _dict({
+                    "data": [],
+                    "expiry": add_to_date(now(), minutes=_CACHE_INTERVAL_, as_string=True, as_datetime=True)
+                }))
+            return {"users": []}
+        
+        user_types = [v.user_type for v in app.user_types] if app.user_types else ["System User"]
+        
         data = frappe.get_all(
             "User",
             fields=["name", "full_name", "user_image"],
             filters={
                 "enabled": 1,
-                "name": ["!=", frappe.session.user],
+                "name": ["in", candidate_users],
                 "user_type": ["in", user_types],
-                "last_active": [">=", start],
             },
             order_by="full_name asc",
             limit_page_length=0,
@@ -134,7 +144,7 @@ def get_users():
             set_cache(_CACHE_, cache_key, _dict({
                 "data": data,
                 "expiry": add_to_date(
-                    now_dt, minutes=_CACHE_INTERVAL_,
+                    now(), minutes=_CACHE_INTERVAL_,
                     as_string=True, as_datetime=True
                 )
             }))
@@ -144,3 +154,15 @@ def get_users():
     except Exception as exc:
         log_error(exc)
         return {"error": 1, "message": _("Unable to get the list of active users.")}
+
+
+def on_user_logout(login_manager=None):
+    """Clear cached active users and delete lingering sessions on logout"""
+    try:
+        user = getattr(login_manager, "user", None) or frappe.session.user
+        if user and user != "Guest":
+            frappe.db.delete("Sessions", {"user": user})
+            frappe.db.commit()
+        del_cache(_CACHE_, "users")
+    except Exception as exc:
+        log_error(exc)

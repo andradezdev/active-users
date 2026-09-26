@@ -47,11 +47,12 @@ class ActiveUsers {
         this.destroy();
         frappe.throw(__(msg, args));
     }
-    request(method, callback, type) {
+    request(method, callback, type, args) {
         var me = this;
         return new Promise(function(resolve, reject) {
             let data = {
                 method: 'active_users.utils.api.' + method,
+                args: args || {},
                 'async': true,
                 freeze: false,
                 callback: function(res) {
@@ -90,7 +91,7 @@ class ActiveUsers {
             if (!me.settings.enabled) return;
             Promise.resolve()
                 .then(function() { me.setup_display(); })
-                .then(function() { me.sync_reload(); });
+                .then(function() { me.sync_reload(false); });
         });
     }
     sync_settings() {
@@ -215,15 +216,15 @@ class ActiveUsers {
         var me = this;
         this.$reload.show().click(function(e) {
             e.preventDefault();
-            if (!me._syncing) me.sync_reload();
+            if (!me._syncing) me.sync_reload(true);
         });
     }
-    sync_reload() {
+    sync_reload(force) {
         if (!this.is_online) return;
         this.clear_sync();
         var me = this;
         Promise.resolve()
-            .then(function() { me.sync_data(); })
+            .then(function() { me.sync_data(force); })
             .then(function() { me.setup_sync(); });
     }
     clear_sync() {
@@ -232,13 +233,10 @@ class ActiveUsers {
             this.sync_timer = null;
         }
     }
-    sync_data() {
+    sync_data(force) {
         this._syncing = true;
-        if (this.data.length) {
-            this.$footer.html('');
-            this.$body.empty();
-        }
         this.$loading.show();
+        let args = force ? { force: 1 } : {};
         this.request(
             'get_users',
             function(res) {
@@ -247,13 +245,14 @@ class ActiveUsers {
                 this.update_list();
                 this._syncing = null;
             },
-            'users list'
+            'users list',
+            args
         );
     }
     setup_sync() {
         var me = this;
         this.sync_timer = window.setInterval(function() {
-            me.sync_data();
+            me.sync_data(false);
         }, this.settings.refresh_interval);
     }
     update_settings() {
@@ -270,7 +269,7 @@ class ActiveUsers {
             }
             Promise.resolve()
                 .then(function() { me.setup_manual_sync(); })
-                .then(function() { me.sync_reload(); });
+                .then(function() { me.sync_reload(true); });
         });
     }
     update_list() {

@@ -32,6 +32,7 @@ app_include_js = [
 after_install = "active_users.setup.install.after_install"
 after_migrate = "active_users.setup.migrate.after_migrate"
 
+on_logout = "active_users.utils.api.on_user_logout"
 
 scheduler_events = {
     "daily": [
