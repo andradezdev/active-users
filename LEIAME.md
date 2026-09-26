@@ -11,7 +11,7 @@ Este documento contém o guia prático de comandos de terminal para instalação
 Acesse a pasta do seu bench:
 
 ```bash
-cd ~/frappe-bench
+cd ~/bench
 ```
 
 Clone o repositório do aplicativo:
@@ -65,15 +65,15 @@ Após a instalação, configure o comportamento do monitoramento no Desk:
 Para atualizar o aplicativo com as últimas modificações do repositório:
 
 ```bash
-cd ~/frappe-bench/apps/active-users
+cd ~/bench/apps/active-users
 git pull origin main
-cd ~/frappe-bench
+cd ~/bench
 bench build --app active_users
 bench --site [sitename] migrate
 bench --site [sitename] clear-cache
 ```
 
-Se necessário, reinicie os serviços do bench:
+Se necessário, reinicie os serviços:
 
 ```bash
 sudo supervisorctl restart all
@@ -86,7 +86,7 @@ sudo supervisorctl restart all
 Para desinstalar o aplicativo de um site específico:
 
 ```bash
-cd ~/frappe-bench
+cd ~/bench
 bench --site [sitename] uninstall-app active_users
 ```
 
