@@ -5,10 +5,8 @@
 *  Licence: Please refer to LICENSE file
 */
 
-
 frappe.provide('frappe._active_users');
 frappe.provide('frappe.dom');
-
 
 class ActiveUsers {
     constructor() {
@@ -107,50 +105,106 @@ class ActiveUsers {
             'settings'
         );
     }
+    mount() {
+        if (!this.$app) return;
+        // Check if already attached and visible in body
+        if (this.$app.parent().length && document.body.contains(this.$app.get(0))) {
+            return;
+        }
+
+        // 1. Frappe v16 Desktop navbar (/desk)
+        let $desktopNotif = $('.desktop-navbar .desktop-notifications');
+        if ($desktopNotif.length) {
+            $desktopNotif.before(this.$app);
+            return;
+        }
+
+        // 2. Frappe v16 page head actions (/app/...)
+        let $pageActions = $('.page-head .standard-items-section .standard-actions');
+        if ($pageActions.length) {
+            $pageActions.prepend(this.$app);
+            return;
+        }
+
+        let $pageSection = $('.page-head .standard-items-section');
+        if ($pageSection.length) {
+            $pageSection.prepend(this.$app);
+            return;
+        }
+
+        // 3. Frappe classic header navbar
+        let $classicNav = $('header.navbar > .container > .navbar-collapse > ul.navbar-nav');
+        if ($classicNav.length) {
+            $classicNav.prepend(this.$app);
+            return;
+        }
+
+        let $navRight = $('.navbar-right, .navbar-nav').first();
+        if ($navRight.length) {
+            $navRight.prepend(this.$app);
+        }
+    }
     setup_display() {
         let title = __('Active Users');
+        let iconHtml = frappe.utils && frappe.utils.icon
+            ? frappe.utils.icon('users', 'md')
+            : '<span class="fa fa-user fa-lg fa-fw"></span>';
+
+        let reloadIconHtml = frappe.utils && frappe.utils.icon
+            ? frappe.utils.icon('refresh-cw', 'sm')
+            : '<span class="fa fa-refresh fa-md fa-fw"></span>';
+
+        let isSystemManager = frappe.user_roles && (frappe.user_roles.includes('System Manager') || frappe.user_roles.includes('Administrator'));
+        let settingsBtn = isSystemManager
+            ? `<a href="#" class="active-users-header-settings text-muted ml-2" title="${__('Settings')}"><span class="fa fa-cog fa-md"></span></a>`
+            : '';
+
         this.$app = $(`
-            <li class="nav-item dropdown dropdown-notifications dropdown-mobile active-users-navbar-item" title="${title}">
-                <a class="nav-link active-users-navbar-icon text-muted"
-                    data-toggle="dropdown" aria-haspopup="true" aria-expanded="true" data-persist="true"
-                    href="#" onclick="return false;">
-                    <span class="fa fa-user fa-lg fa-fw"></span>
-                </a>
-                <div class="dropdown-menu active-users-list" role="menu">
-                    <div class="fluid-container">
-                        <div class="row">
-                            <div class="col active-users-list-header">${title}</div>
+            <div class="dropdown dropdown-notifications dropdown-mobile active-users-navbar-item" title="${title}" style="display: inline-flex; align-items: center;">
+                <button class="btn-reset nav-link active-users-navbar-icon text-muted"
+                    data-toggle="dropdown" aria-haspopup="true" aria-expanded="false" data-persist="true"
+                    type="button" style="cursor: pointer; padding: 4px 8px; display: inline-flex; align-items: center;">
+                    ${iconHtml}
+                </button>
+                <div class="dropdown-menu dropdown-menu-right active-users-list" role="menu" style="min-width: 280px; z-index: 1050; border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,0.12);">
+                    <div class="active-users-list-header px-3 py-2 border-bottom d-flex justify-content-between align-items-center">
+                        <span class="font-weight-bold" style="font-size: 0.85rem;">${title}</span>
+                        ${settingsBtn}
+                    </div>
+                    <div class="active-users-list-body" style="max-height: 280px; overflow-y: auto;">
+                        <div class="active-users-list-loading p-3 text-center">
+                            <div class="active-users-list-loading-box"></div>
                         </div>
                     </div>
-                    <div class="row">
-                        <div class="col active-users-list-body">
-                            <div class="active-users-list-loading">
-                                <div class="active-users-list-loading-box"></div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="row">
-                        <div class="col active-users-list-footer">
-                            <div class="row">
-                                <div class="col active-users-footer-text"></div>
-                                <div class="col-auto active-users-footer-icon">
-                                    <a href="#" class="active-users-footer-reload">
-                                        <span class="fa fa-refresh fa-md fa-fw"></span>
-                                    </a>
-                                </div>
-                            </div>
+                    <div class="active-users-list-footer px-3 py-2 border-top d-flex justify-content-between align-items-center">
+                        <div class="active-users-footer-text text-muted small"></div>
+                        <div class="active-users-footer-icon">
+                            <a href="#" class="active-users-footer-reload text-muted" title="${__('Refresh')}">
+                                ${reloadIconHtml}
+                            </a>
                         </div>
                     </div>
                 </div>
-            </li>
+            </div>
         `);
-        $('header.navbar > .container > .navbar-collapse > ul.navbar-nav').prepend(this.$app.get(0));
-        
+
+        this.mount();
+
+        var me = this;
+        $(document).on('page-change toolbar_setup', function() {
+            setTimeout(function() { me.mount(); }, 150);
+        });
+
         this.$body = this.$app.find('.active-users-list-body').first();
         this.$loading = this.$body.find('.active-users-list-loading').first().hide();
         this.$footer = this.$app.find('.active-users-footer-text').first();
         this.$reload = this.$app.find('.active-users-footer-reload').first();
-        
+
+        this.$app.find('.active-users-header-settings').on('click', function(e) {
+            e.preventDefault();
+            frappe.set_route('Form', 'Active Users Settings');
+        });
+
         this.setup_manual_sync();
     }
     setup_manual_sync() {
@@ -221,13 +275,23 @@ class ActiveUsers {
     }
     update_list() {
         var me = this;
+        this.$body.empty();
+        if (!this.data || !this.data.length) {
+            this.$body.html(`
+                <div class="text-muted text-center py-4 px-3 small">
+                    ${__('No other active users online')}
+                </div>
+            `);
+            this.$footer.html(__('Total') + ': 0');
+            return;
+        }
         this.data.forEach(function(v) {
             let avatar = frappe.get_avatar(null, v.full_name, v.user_image),
             name = v.full_name,
             item = $(`
-                <div class="row active-users-list-item">
-                    <div class="col-auto active-users-item-avatar">${avatar}</div>
-                    <div class="col active-users-item-name">${name}</div>
+                <div class="row active-users-list-item px-3 py-2 align-items-center border-bottom m-0">
+                    <div class="col-auto p-0 mr-2">${avatar}</div>
+                    <div class="col p-0 ellipsis text-truncate font-weight-500" style="font-size: 0.85rem;">${name}</div>
                 </div>
             `);
             me.$body.append(item.get(0));
@@ -237,7 +301,7 @@ class ActiveUsers {
 }
 
 frappe._active_users.init = function() {
-    if (frappe._active_users._init) frappe._active_users._init.destory();
+    if (frappe._active_users._init) frappe._active_users._init.destroy();
     if (frappe.desk == null) return;
     frappe._active_users._init = new ActiveUsers();
 };

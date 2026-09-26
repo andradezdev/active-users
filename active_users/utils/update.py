@@ -76,7 +76,7 @@ def check_for_update():
                 latest_version,
                 doc.update_notification_sender,
                 [v.user for v in doc.update_notification_receivers],
-                markdown(response.get("body"))
+                markdown(data.get("body"))
             )
     
     doc.save(ignore_permissions=True)
@@ -133,7 +133,7 @@ def enqueue_send_notification(version, sender, receivers, message):
 ## Self
 def send_notification(version, sender, receivers, message):
     for receiver in receivers:
-        if is_notifications_enabled(user):
+        if is_notifications_enabled(receiver):
             (frappe.new_doc("Notification Log")
                 .update({
                     "document_type": _SETTINGS_,
